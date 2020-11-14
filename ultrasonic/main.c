@@ -17,24 +17,23 @@ const unsigned char lcd_num[10] = {
     0xF7,        // 9
 };
 
-char buff[100];
+
 uint8_t compareDone = 0,reset;
 uint16_t negEdge,posEdge,distance,diff;
-const uint16_t onecycle = 30;//1/32768
+const uint16_t onecycle = 30;//         1/32768
 
 int main(void)
 {
     WDTCTL = WDTPW | WDTHOLD;   // stop watchdog timer
 
+    //LCD initialization
     lcdInit();
 
-    P9DIR |= BIT7;
-    P9OUT &= ~BIT7;
-
+    //Configuring Trigger pin as output
     P3DIR |= BIT3;
     P3OUT &= ~BIT3;
 
-
+    //Configuring echo pin as input
     P1DIR &= ~BIT7;
     P1SEL0 |= BIT7;
     P1SEL1 |= BIT7;
@@ -44,20 +43,24 @@ int main(void)
       // Timer0_A3 Setup
       TA0CCTL2 = CM_3 | CCIS_0 | SCS | CAP | CCIE;
                                                 // Capture rising edge,
-                                                // Use CCI2B=ACLK,
+                                                // Use CCI2B=ACLK, //32768 Hz
                                                 // Synchronous capture,
                                                 // Enable capture mode,
                                                 // Enable capture interrupt
 
+      //Trigger pin high for more than 20us
       P3OUT |= BIT3;
       __delay_cycles(20);
       P3OUT &= ~BIT3;
+
+      //Start the timer
       TA0CTL = TASSEL__ACLK | MC__CONTINUOUS;  // Use SMCLK as clock source,
                                                 // Start timer in continuous mode
       __bis_SR_register(GIE);
 
       while(1)
       {
+          //Perform calculation to find distance in cm.
           if(compareDone == 0x02)
           {
               __disable_interrupt();
@@ -66,7 +69,7 @@ int main(void)
               distance = (onecycle * diff) / 58;
               if(distance < 30)
               {
-                  // Display "3" on " on Segment 28,29
+                  // Display digits
                   LCDM15 = lcd_num[distance / 10];
                   LCDM8 = lcd_num[distance % 10];
               }
@@ -75,6 +78,8 @@ int main(void)
 //                  LCDM15 = lcd_num[0];
 //                  LCDM8 = lcd_num[0];
 //              }
+
+              //After calculation restart the operation
               compareDone = 0x00;
               __enable_interrupt();
               P3OUT |= BIT3;
@@ -85,6 +90,8 @@ int main(void)
           }
             __delay_cycles(800000);
             reset++;
+
+            //If calculation fails restart the operation again
           if(reset == 10)
           {
               __disable_interrupt();
@@ -101,15 +108,9 @@ int main(void)
     return 0;
 }
 
-// Timer0_A3 CC1-4, TA Interrupt Handler
-#if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+// Timer0_A3 CC1-2, TA Interrupt Handler
 #pragma vector = TIMER0_A1_VECTOR
 __interrupt void Timer0_A1_ISR(void)
-#elif defined(__GNUC__)
-void __attribute__ ((interrupt(TIMER0_A1_VECTOR))) Timer0_A1_ISR (void)
-#else
-#error Compiler not supported!
-#endif
 {
   switch (__even_in_range(TA0IV, TA0IV_TAIFG)) {
     case TA0IV_TA0CCR1:
@@ -117,11 +118,13 @@ void __attribute__ ((interrupt(TIMER0_A1_VECTOR))) Timer0_A1_ISR (void)
     case TA0IV_TA0CCR2:
         if(compareDone == 0x00)
         {
+            //Capture the timer value when echo pin becomes high (ranging start)
             posEdge = TA0CCR2;
             compareDone = 0x01;
         }
         else if(compareDone == 0x01)
         {
+            //Capture the timer value when echo pin becomes low (ranging stops)
             negEdge = TA0CCR2;
             compareDone = 0x02;
         }
